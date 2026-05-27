@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>렉스김어학원 - 상담실 실시간 안내 스크린</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+        body { font-family: 'Noto Sans KR', sans-serif; word-break: keep-all; }
+        
+        /* 깜빡이는 애니메이션 효과 (입장 강조용) */
+        @keyframes pulse-bg {
+            0%, 100% { background-color: #1e3a8a; }
+            50% { background-color: #1d4ed8; }
+        }
+        .active-display { animation: pulse-bg 3s infinite; }
+    </style>
+</head>
+<body class="bg-slate-900 min-h-screen flex flex-col items-center justify-between p-8 md:p-12 text-white">
+
+    <!-- 상단 헤더 / 스크린 설정 영역 (인쇄 및 화면 구성용) -->
+    <header class="w-full max-w-7xl flex flex-col md:flex-row justify-between items-center border-b border-white/10 pb-6 mb-6">
+        <div class="text-center md:text-left mb-4 md:mb-0">
+            <h1 class="text-2xl md:text-3xl font-black tracking-tighter text-blue-400">LEXKIM LANGUAGE ACADEMY</h1>
+            <p class="text-xs md:text-sm text-slate-400 font-bold mt-1">실시간 상담 호출 현황판</p>
+        </div>
+        <!-- 스크린 매핑을 위한 설정 박스 (최초 1회 설정 후 숨김 가능) -->
+        <div id="setupBox" class="bg-slate-800/80 p-4 rounded-2xl border border-white/10 flex items-center gap-3 text-sm">
+            <label class="font-bold text-slate-300">이 스크린의 담당 선생님:</label>
+            <select id="screenTeacherSelect" onchange="changeTargetTeacher(this.value)" class="bg-slate-950 border border-white/20 rounded-xl p-2 font-bold text-blue-300 outline-none">
+                <option value="">선생님 선택</option>
+            </select>
+            <button onclick="toggleSetupVisibility()" class="text-xs bg-white/10 px-3 py-2 rounded-lg hover:bg-white/20 transition-all">설정창 숨기기</button>
+        </div>
+        <button id="showSetupBtn" onclick="toggleSetupVisibility()" class="hidden text-xs bg-slate-800 border border-white/10 px-3 py-2 rounded-lg hover:bg-slate-700 transition-all">⚙️ 스크린 설정 변경</button>
+    </header>
+
+    <!-- 대형 정보 표시 메인 보드 -->
+    <main class="flex-1 w-full max-w-7xl flex flex-col items-center justify-center my-auto">
+        <div id="displayContainer" class="w-full bg-slate-800/40 border-2 border-white/5 rounded-[3rem] p-12 text-center shadow-2xl min-h-[55vh] flex flex-col items-center justify-center transition-all duration-500">
+            
+            <!-- 대기 상태 화면 (호출된 상담이 없을 때) -->
+            <div id="idleState" class="space-y-4">
+                <div class="text-slate-500 text-7xl md:text-8xl font-black">☕</div>
+                <h2 id="idleMessage" class="text-2xl md:text-3xl font-bold text-slate-400">현재 호출된 상담 일정이 없습니다.</h2>
+                <p class="text-sm text-slate-500">선생님 관리 페이지에서 [상태] 체크박스를 켜시면 여기에 실시간으로 표시됩니다.</p>
+            </div>
+
+            <!-- 활성화 상태 화면 (체크박스 켜졌을 때 크게 표기) -->
+            <div id="activeState" class="hidden w-full space-y-10 animate-fade-in">
+                <!-- 시간 및 레벨 배지 -->
+                <div class="flex justify-center items-center gap-4 flex-wrap">
+                    <span id="targetTime" class="bg-blue-600 text-white font-black text-3xl md:text-5xl px-8 py-3 rounded-2xl shadow-lg">10:10</span>
+                    <span id="targetLevel" class="bg-amber-500 text-slate-900 font-black text-3xl md:text-5xl px-8 py-3 rounded-2xl shadow-lg">2A</span>
+                </div>
+
+                <!-- 학생 이름 표기 영역 (초대형 인지 레이아웃) -->
+                <div class="space-y-4 py-4">
+                    <h2 class="text-slate-400 font-bold text-2xl md:text-3xl tracking-wide">지금 상담하실 학부모님</h2>
+                    <div class="flex flex-col md:flex-row justify-center items-center gap-x-8 gap-y-2 mt-2">
+                        <span id="targetKrName" class="text-white font-black text-6xl md:text-8.5xl tracking-tight drop-shadow-md">홍길동</span>
+                        <span id="targetEnName" class="text-blue-300 font-black text-4xl md:text-6xl italic">David</span>
+                    </div>
+                </div>
+
+                <!-- 하단 고정 안내 메시지 (이름보다 약간 작은 글씨로 인지하기 쉽게 구성) -->
+                <div class="pt-8 border-t border-white/10 w-full max-w-4xl mx-auto">
+                    <p class="text-amber-400 font-black text-2xl md:text-4xl tracking-tight leading-relaxed drop-shadow">
+                        📢 학부모님 상담실 앞에서 노크후 들어 가시면 됩니다.
+                    </p>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- 하단 풋터 바 -->
+    <footer class="w-full max-w-7xl border-t border-white/5 pt-6 mt-6 flex justify-between items-center text-xs text-slate-500 font-bold">
+        <div>렉스김어학원 상담 예약 현황판 스크린 시스템 v1.0</div>
+        <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-green-500 animate-ping"></span>
+            <span id="connectionStatus">실시간 데이터 원격 연결됨</span>
+        </div>
+    </footer>
+
+    <script>
+        // 메인 프레임워크와 동일한 Firebase 리얼타임 데이터베이스 환경 설정
+        const firebaseConfig = { databaseURL: "https://lexkimhw-63c3b-default-rtdb.asia-southeast1.firebasedatabase.app/" };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
+
+        let targetTeacher = localStorage.getItem('screen_assigned_teacher') || "";
+        let allAppointments = {};
+
+        // 초기화 함수: 선생님 목록 바인딩 및 이전 저장 설정 로드
+        function initScreen() {
+            db.ref('settings/teachers').once('value', snap => {
+                const teachers = snap.val() || {};
+                const select = document.getElementById('screenTeacherSelect');
+                const teacherNames = new Set();
+
+                Object.values(teachers).forEach(t => { if(t.name) teacherNames.add(t.name); });
+                
+                Array.from(teacherNames).sort().forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.innerText = name + " 선생님 매핑";
+                    if(name === targetTeacher) opt.selected = true;
+                    select.appendChild(opt);
+                });
+
+                if(targetTeacher) {
+                    toggleSetupVisibility(false); // 이미 설정된 선생님이 있으면 설정창 숨김
+                    startListening();
+                }
+            });
+        }
+
+        // 스크린 대상 담당 선생님 변경 핸들러
+        function changeTargetTeacher(name) {
+            targetTeacher = name;
+            localStorage.setItem('screen_assigned_teacher', name);
+            if(name) {
+                startListening();
+            } else {
+                resetToIdle();
+            }
+        }
+
+        // 설정 창 노출 여부 토글
+        function toggleSetupVisibility(forcedStatus) {
+            const box = document.getElementById('setupBox');
+            const btn = document.getElementById('showSetupBtn');
+            
+            let isHidden = box.classList.contains('hidden');
+            if (forcedStatus !== undefined) isHidden = !forcedStatus;
+
+            if(isHidden) {
+                box.classList.remove('hidden');
+                btn.classList.add('hidden');
+            } else {
+                box.classList.add('hidden');
+                btn.classList.remove('hidden');
+            }
+        }
+
+        // 실시간 실시간 데이터 스트리밍 리스너 구동
+        function startListening() {
+            if(!targetTeacher) return;
+
+            // 데이터 동기화 리스너 바인딩
+            db.ref('appointments').on('value', snap => {
+                allAppointments = snap.val() || {};
+                updateScreenDisplay();
+            });
+        }
+
+        // 화면 갱신 메인 파이프라인
+        function updateScreenDisplay() {
+            const container = document.getElementById('displayContainer');
+            const idle = document.getElementById('idleState');
+            const active = document.getElementById('activeState');
+
+            let activeAppointment = null;
+
+            // 전체 예약 테이블을 탐색하여 '현재 담당 선생님' + '체크박스가 ON(true)' 인 조건 확인
+            Object.values(allAppointments).forEach(app => {
+                if (app.items && Array.isArray(app.items)) {
+                    app.items.forEach(item => {
+                        if (item.teacher === targetTeacher && item.check === true) {
+                            // 조건에 부합하는 활성 노드가 식별된 경우 오브젝트 조립
+                            activeAppointment = {
+                                time: item.time,
+                                level: app.level,
+                                krName: app.krName,
+                                enName: app.enName || '',
+                                date: app.date
+                            };
+                        }
+                    });
+                }
+            });
+
+            // 매칭되는 활성화 호출 데이터가 존재할 경우
+            if (activeAppointment) {
+                // UI 텍스트 데이터 바인딩
+                document.getElementById('targetTime').innerText = activeAppointment.time;
+                document.getElementById('targetLevel').innerText = activeAppointment.level;
+                document.getElementById('targetKrName').innerText = activeAppointment.krName;
+                document.getElementById('targetEnName').innerText = activeAppointment.enName;
+
+                // 스크린 분위기 반전 애니메이션 클래스 제어
+                container.classList.add('active-display', 'border-blue-500/30');
+                container.classList.remove('bg-slate-800/40');
+
+                // 레이아웃 스위칭
+                idle.classList.add('hidden');
+                active.classList.remove('hidden');
+            } else {
+                // 호출된 상담이 없거나 해제된 경우 대기 모드로 리셋
+                resetToIdle();
+            }
+        }
+
+        // 대기 화면 리셋
+        function resetToIdle() {
+            const container = document.getElementById('displayContainer');
+            const idle = document.getElementById('idleState');
+            const active = document.getElementById('activeState');
+            const idleMessage = document.getElementById('idleMessage');
+
+            if(targetTeacher) {
+                idleMessage.innerText = `[${targetTeacher} 선생님] 상담실 대기 중`;
+            } else {
+                idleMessage.innerText = "상단을 통해 담당 선생님 스크린을 설정하세요.";
+            }
+
+            container.classList.remove('active-display', 'border-blue-500/30');
+            container.classList.add('bg-slate-800/40');
+
+            idle.classList.remove('hidden');
+            active.classList.add('hidden');
+        }
+
+        // 인프라 실행
+        initScreen();
+    </script>
+</body>
+</html>
